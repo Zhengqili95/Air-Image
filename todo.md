@@ -76,7 +76,7 @@
 
 - [x] MSYS2 沒有裝在 `C:\msys64` 時，build bridge 前要設定 `$env:BAZEL_SH`，指向 MSYS2 的 `usr\bin\bash.exe`；Bazelisk 沒有加入 PATH 時，也要暫時加進 `$env:PATH`
 - [x] **修正相機時間戳記問題**：沒有註冊 UVC metadata 的 Windows 電腦上，相機硬體時間戳記不會前進，導致 MediaPipe 拒絕每一幀（完全追蹤不到手），表面掃描也永遠不會逾時。新增 `FrameClock`（`src/frame_clock.cpp`）：硬體時鐘沒有前進時改用主機時鐘，並保證每一幀嚴格遞增；附 4 個單元測試
-- [ ] 把上面的建置注意事項寫進 README 給組員
+- [x] 把上面的建置注意事項寫進 README 給組員（README「Windows 建置注意事項」）
 - [ ] （選做）以系統管理員身分執行 Orbbec SDK 安裝資料夾裡的 `shared\obsensor_metadata_win10.ps1 -op install_all` 註冊 metadata，改用比較準確的硬體時間戳記（每次換新相機都要重做）
 - [ ] （選做）在 `config/default.yaml` 關閉 `camera.sdk_spatial_filter`：這台電腦上 SDK 空間濾波器會執行失敗，程式會自動停用它，但會一直顯示警告
 

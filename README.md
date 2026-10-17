@@ -33,7 +33,7 @@ ASKA3D、雙手及系統按鍵注入不在本 MVP 範圍。
 - Visual Studio 2026 Community 或相容的 MSVC Build Tools
 - CMake、Ninja
 - Bazelisk
-- MSYS2（MediaPipe Bazel genrule 需要 `bash` 與 `awk`）
+- MSYS2（MediaPipe Bazel genrule 需要 `bash` 與 `awk`，另需安裝 `patch`、`unzip`、`perl` 套件）
 - Orbbec SDK 2.9.3：`C:\Program Files\OrbbecSDK 2.9.3`
 
 OpenCV 與 yaml-cpp 由 `vcpkg.json` manifest 管理。
@@ -84,6 +84,39 @@ git clone --depth 1 --branch v0.10.35 https://github.com/google-ai-edge/mediapip
 - `z.dll`
 
 版本與雜湊記錄於 `mediapipe_bridge/VERSION.txt`。
+
+## Windows 建置注意事項
+
+以下是在一台全新的 Windows 11 電腦上從頭建置時遇到的問題與解法：
+
+1. **一定要用 x64 開發者環境。** 開始功能表裡的「Developer PowerShell」預設是 32 位元，連結 Orbbec SDK 時會失敗。請改用：
+
+   ```powershell
+   & "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+   ```
+
+2. **專案路徑只用英數字、不含空白**，例如 `D:\AirImage`，否則 Bazel 或 vcpkg 可能出錯。
+3. **Orbbec SDK 沒有裝在預設路徑時**，在專案根目錄建立 `CMakeUserPresets.json`（已列入 `.gitignore`）覆寫 `ORBBEC_SDK_ROOT`，之後把指令裡的 `windows-release` 都換成 `local-release`：
+
+   ```json
+   {
+     "version": 6,
+     "configurePresets": [
+       { "name": "local-release", "inherits": "windows-release",
+         "cacheVariables": { "ORBBEC_SDK_ROOT": "<OrbbecSDK 2.9.3 的安裝路徑>" } }
+     ],
+     "buildPresets": [ { "name": "local-release", "configurePreset": "local-release" } ],
+     "testPresets": [ { "name": "local-release", "configurePreset": "local-release" } ]
+   }
+   ```
+
+4. **建置 MediaPipe bridge 之前：**
+   - 開啟 Windows「設定 → 系統 → 開發人員專用 → 開發人員模式」。否則 LLVM 的設定腳本無法建立 symlink，會出現 `WinError 1314`。
+   - 在 MSYS2 終端機執行 `pacman -S --needed patch unzip perl`。缺少 `perl` 時，TensorFlow Lite 的 genrule 會以 `perl: command not found` 失敗。
+   - MSYS2 沒有裝在 `C:\msys64` 時，先設定 `$env:BAZEL_SH = '<MSYS2 安裝路徑>\usr\bin\bash.exe'`；`bazelisk` 也必須能從 `PATH` 找到。
+   - 第一次建置時 Bazel 會下載數 GB 的相依套件，整個過程需要數十分鐘。之後重新建置會沿用快取，快很多。
+5. **PowerShell 擋下腳本**：從網路下載的專案檔案帶有下載標記，執行 `.\scripts\*.ps1` 時會被 `RemoteSigned` 原則擋下。可以先執行 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`，只對目前的視窗有效。
+6. **相機時間戳記**：Windows 沒有註冊 UVC metadata 時，Gemini 2 的硬體時間戳記不會前進。程式會用 `FrameClock` 自動改用主機時間，HUD 會顯示對應的相機警告，不需要額外處理。如果想使用硬體時間戳記，可以用系統管理員權限執行 Orbbec SDK 安裝資料夾裡的 `shared\obsensor_metadata_win10.ps1 -op install_all`。
 
 ## 執行
 
