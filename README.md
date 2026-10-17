@@ -2,6 +2,8 @@
 
 Windows 原生 C++ 原型：Orbbec Gemini 2 RGB-D、MediaPipe Hand Landmarker、表面掃描加三點鍵盤幾何校正、桌面實地鍵盤投影與單次觸控事件。
 
+**只想執行、不想自己建置：** 到 [Releases](https://github.com/Zhengqili95/Air-Image/releases) 下載已編譯好的 Windows 64 位元版本，解壓縮後接上 Gemini 2，雙擊 `start_aerial_keypad.cmd`，再照 zip 裡的 `README.txt` 校正即可。不需要安裝 Visual Studio。
+
 ## 已實作
 
 - Orbbec SDK 2.9.3 同步 RGB／Depth 擷取，可由 YAML 選擇裝置支援的深度模式、深度精度、30／60 FPS 與 50／60 Hz 防閃爍。
