@@ -1,24 +1,28 @@
 #include "aerial_touch/keypad_overlay.hpp"
+#include "aerial_touch/input_method.hpp"
 
 namespace aerial_touch {
 
 KeypadOverlayLayout fixed_keypad_overlay_layout() {
-    constexpr int key_width = 30;
-    constexpr int key_height = 30;
-    constexpr int horizontal_gap = 5;
-    constexpr int vertical_gap = 5;
+    // Large enough for a two-line label such as "7" over "pqrs" once letter mode is active.
+    constexpr int key_width = 44;
+    constexpr int key_height = 44;
+    constexpr int horizontal_gap = 6;
+    constexpr int vertical_gap = 6;
 
     KeypadOverlayLayout layout;
     layout.width_px = 3 * key_width + 2 * horizontal_gap;
     layout.height_px = 4 * key_height + 3 * vertical_gap;
     layout.margin_px = 12;
 
-    static constexpr std::array<const char*, 9> rows{ "1", "2", "3", "4", "5", "6", "7", "8", "9" };
-    for(int row = 0; row < 3; ++row) {
+    // Row-major, phone order: the fourth row is mode key, "0", delete key.
+    static constexpr std::array<const char*, 12> keys{ "1", "2", "3", "4", "5", "6",
+                                                       "7", "8", "9", kModeKey, "0", kDeleteKey };
+    for(int row = 0; row < 4; ++row) {
         for(int column = 0; column < 3; ++column) {
-            const int index = row * 3 + column;
-            layout.regions[static_cast<std::size_t>(index)] = {
-                rows[static_cast<std::size_t>(index)],
+            const auto index = static_cast<std::size_t>(row * 3 + column);
+            layout.regions[index] = {
+                keys[index],
                 column * (key_width + horizontal_gap),
                 row * (key_height + vertical_gap),
                 key_width,
@@ -26,7 +30,6 @@ KeypadOverlayLayout fixed_keypad_overlay_layout() {
             };
         }
     }
-    layout.regions.back() = { "0", key_width + horizontal_gap, 3 * (key_height + vertical_gap), key_width, key_height };
     return layout;
 }
 

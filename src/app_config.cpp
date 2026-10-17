@@ -70,7 +70,8 @@ void validate_app_config(const AppConfig& config) {
        || config.keypad.boundary_hysteresis_mm < 0.0F
        || config.calibration.minimum_point_distance_mm <= 0.0F
        || config.calibration.mad_multiplier <= 0.0F
-       || config.calibration.minimum_outlier_threshold_mm <= 0.0F) {
+       || config.calibration.minimum_outlier_threshold_mm <= 0.0F
+       || config.input.multitap_timeout_ms <= 0) {
         throw std::runtime_error(u8"設定包含無效的幾何尺寸或臨界值");
     }
 }
@@ -138,6 +139,16 @@ AppConfig load_app_config(const std::filesystem::path& path) {
     config.calibration.minimum_outlier_threshold_mm =
         optional_value<float>(root, "calibration", "minimum_outlier_threshold_mm",
                               config.calibration.minimum_outlier_threshold_mm);
+    const auto letter_selection = optional_value<std::string>(
+        root, "input", "letter_selection", letter_selection_name(config.input.letter_selection));
+    const auto parsed_letter_selection = parse_letter_selection(letter_selection);
+    if(!parsed_letter_selection.has_value()) {
+        throw std::runtime_error(std::string(u8"無效的英文選字方式：") + letter_selection
+                                 + u8"（只能是 two_step 或 multitap）");
+    }
+    config.input.letter_selection = *parsed_letter_selection;
+    config.input.multitap_timeout_ms =
+        optional_value<std::int64_t>(root, "input", "multitap_timeout_ms", config.input.multitap_timeout_ms);
 
     validate_app_config(config);
     return config;
@@ -197,6 +208,11 @@ void save_app_config(const AppConfig& config, const std::filesystem::path& path)
     emitter << YAML::Key << "mad_multiplier" << YAML::Value << config.calibration.mad_multiplier;
     emitter << YAML::Key << "minimum_outlier_threshold_mm" << YAML::Value
             << config.calibration.minimum_outlier_threshold_mm;
+    emitter << YAML::EndMap;
+    emitter << YAML::Key << "input" << YAML::Value << YAML::BeginMap;
+    emitter << YAML::Key << "letter_selection" << YAML::Value
+            << letter_selection_name(config.input.letter_selection);
+    emitter << YAML::Key << "multitap_timeout_ms" << YAML::Value << config.input.multitap_timeout_ms;
     emitter << YAML::EndMap;
     emitter << YAML::EndMap;
 

@@ -18,7 +18,7 @@ struct KeypadOverlayLayout {
     int width_px{};
     int height_px{};
     int margin_px{};
-    std::array<KeypadOverlayRegion, 10> regions{};
+    std::array<KeypadOverlayRegion, 12> regions{};
 };
 
 KeypadOverlayLayout fixed_keypad_overlay_layout();

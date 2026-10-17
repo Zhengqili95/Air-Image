@@ -40,3 +40,6 @@ calibration:
   required_samples: 18
   mad_multiplier: 3.5
   minimum_outlier_threshold_mm: 2.0
+input:
+  letter_selection: multitap
+  multitap_timeout_ms: 1500

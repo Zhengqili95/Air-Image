@@ -1,4 +1,5 @@
 #include "aerial_touch/keypad.hpp"
+#include "aerial_touch/input_method.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +27,12 @@ Keypad::Keypad(const KeypadGeometry geometry) {
     const float zero_u = geometry.key_width_mm + geometry.horizontal_gap_mm;
     const float zero_v = 3.0F * (geometry.key_height_mm + geometry.vertical_gap_mm);
     regions_.push_back({ "0", zero_u, zero_u + geometry.key_width_mm, zero_v,
+                         zero_v + geometry.key_height_mm });
+
+    // The corners beside "0" carry the input commands, like * and # on a phone keypad.
+    const float delete_u = 2.0F * (geometry.key_width_mm + geometry.horizontal_gap_mm);
+    regions_.push_back({ kModeKey, 0.0F, geometry.key_width_mm, zero_v, zero_v + geometry.key_height_mm });
+    regions_.push_back({ kDeleteKey, delete_u, delete_u + geometry.key_width_mm, zero_v,
                          zero_v + geometry.key_height_mm });
 }
 

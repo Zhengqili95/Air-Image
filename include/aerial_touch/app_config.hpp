@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aerial_touch/camera_settings.hpp"
+#include "aerial_touch/input_method.hpp"
 #include "aerial_touch/keypad.hpp"
 #include "aerial_touch/touch_state_machine.hpp"
 
@@ -57,6 +58,7 @@ struct AppConfig {
     TouchConfig touch;
     KeypadConfig keypad;
     CalibrationConfig calibration;
+    InputMethodConfig input;
 };
 
 AppConfig load_app_config(const std::filesystem::path& path);

@@ -49,3 +49,9 @@ calibration:
   required_samples: 18
   mad_multiplier: 3.5
   minimum_outlier_threshold_mm: 2.0
+
+input:
+  # 英文模式的選字方式。two_step：按 7 後上排變成 p q r s，再按一次選字母，每個字母固定按 2 次、不用計時；
+  # multitap：像手機一樣連按同一鍵換字母，停 multitap_timeout_ms 後自動確定。
+  letter_selection: two_step
+  multitap_timeout_ms: 1200

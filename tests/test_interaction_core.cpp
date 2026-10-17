@@ -420,11 +420,16 @@ bool keypad_overlay_clears_pressed_key_when_not_currently_held() {
 
 bool fixed_keypad_overlay_layout_has_default_size() {
     const auto layout = aerial_touch::fixed_keypad_overlay_layout();
-    return layout.width_px == 100 && layout.height_px == 135 && layout.margin_px == 12
+    const auto& mode = layout.regions[9];
+    const auto& zero = layout.regions[10];
+    const auto& erase = layout.regions[11];
+    return layout.width_px == 144 && layout.height_px == 194 && layout.margin_px == 12
            && layout.regions.front().key == "1" && layout.regions.front().x_px == 0
-           && layout.regions.front().y_px == 0 && layout.regions.front().width_px == 30
-           && layout.regions.front().height_px == 30 && layout.regions.back().key == "0"
-           && layout.regions.back().x_px == 35 && layout.regions.back().y_px == 105;
+           && layout.regions.front().y_px == 0 && layout.regions.front().width_px == 44
+           && layout.regions.front().height_px == 44
+           && mode.key == aerial_touch::kModeKey && mode.x_px == 0 && mode.y_px == 150
+           && zero.key == "0" && zero.x_px == 50 && zero.y_px == 150
+           && erase.key == aerial_touch::kDeleteKey && erase.x_px == 100 && erase.y_px == 150;
 }
 
 bool touch_config_update_preserves_armed_state() {
@@ -491,7 +496,9 @@ bool yaml_config_loads_all_runtime_thresholds() {
            && approximately_equal(config.calibration.minimum_point_distance_mm, 85.0F)
            && config.calibration.required_samples == 18U
            && approximately_equal(config.calibration.mad_multiplier, 3.5F)
-           && approximately_equal(config.calibration.minimum_outlier_threshold_mm, 2.0F);
+           && approximately_equal(config.calibration.minimum_outlier_threshold_mm, 2.0F)
+           && config.input.letter_selection == aerial_touch::LetterSelection::MultiTap
+           && config.input.multitap_timeout_ms == 1500;
 }
 
 bool yaml_config_round_trips_through_save() {
@@ -543,7 +550,9 @@ bool yaml_config_round_trips_through_save() {
            && restored.calibration.required_samples == source.calibration.required_samples
            && approximately_equal(restored.calibration.mad_multiplier, source.calibration.mad_multiplier)
            && approximately_equal(restored.calibration.minimum_outlier_threshold_mm,
-                                  source.calibration.minimum_outlier_threshold_mm);
+                                  source.calibration.minimum_outlier_threshold_mm)
+           && restored.input.letter_selection == source.input.letter_selection
+           && restored.input.multitap_timeout_ms == source.input.multitap_timeout_ms;
 }
 
 bool short_tracking_loss_cannot_trigger_on_reacquisition() {
@@ -679,7 +688,9 @@ bool legacy_yaml_uses_defaults_for_new_stabilization_fields() {
                         && config.touch.dwell_ms == 350
                         && approximately_equal(config.depth.finger_clearance_mm, 3.0F)
                         && config.depth.surface_scan_radius_px == 150
-                        && approximately_equal(config.fingertip.depth_probe_near_ratio, 0.35F);
+                        && approximately_equal(config.fingertip.depth_probe_near_ratio, 0.35F)
+                        && config.input.letter_selection == aerial_touch::LetterSelection::TwoStep
+                        && config.input.multitap_timeout_ms == 1200;
     }
     catch(const std::exception&) {
     }
@@ -717,8 +728,47 @@ bool app_config_validation_rejects_invalid_values() {
         rejects_too_few_samples = true;
     }
 
+    config = aerial_touch::AppConfig{};
+    config.input.multitap_timeout_ms = 0;
+    bool rejects_zero_multitap_timeout = false;
+    try {
+        aerial_touch::validate_app_config(config);
+    }
+    catch(const std::exception&) {
+        rejects_zero_multitap_timeout = true;
+    }
+
     return rejects_equal_thresholds && rejects_negative_gap && rejects_too_few_samples
+           && rejects_zero_multitap_timeout
            && approximately_equal(aerial_touch::AppConfig{}.touch.min_approach_velocity_mm_s, 40.0F);
+}
+
+// A misspelt selection must fail loudly at startup instead of quietly falling back to the default,
+// or an experiment could run with the wrong input method without anyone noticing.
+bool yaml_config_rejects_unknown_letter_selection() {
+    const auto path = std::filesystem::temp_directory_path() / "aerial_touch_config_letter_selection.yaml";
+    std::ofstream output(path);
+    output << "depth:\n"
+              "  sample_radius: 2\n"
+              "touch:\n"
+              "  touch_threshold_mm: 10.0\n"
+              "  release_threshold_mm: 20.0\n"
+              "  min_approach_velocity_mm_s: 0.0\n"
+              "  tracking_timeout_ms: 300\n"
+              "calibration:\n"
+              "  minimum_point_distance_mm: 80.0\n"
+              "input:\n"
+              "  letter_selection: t9\n";
+    output.close();
+    bool rejected = false;
+    try {
+        static_cast<void>(aerial_touch::load_app_config(path));
+    }
+    catch(const std::exception&) {
+        rejected = true;
+    }
+    std::filesystem::remove(path);
+    return rejected;
 }
 
 bool preview_classifies_touch_zones() {
@@ -1278,7 +1328,7 @@ bool config_change_discards_stale_approach_evidence() {
 bool run_interaction_core_tests() {
     // Every case runs and names itself on failure. The old form was one long && chain, so the first
     // failure short-circuited the rest and the suite reported nothing but a non-zero exit code.
-    const std::array<std::pair<const char*, bool (*)()>, 70> tests{ {
+    const std::array<std::pair<const char*, bool (*)()>, 71> tests{ {
         { "plane_projection_uses_camera_facing_normal", &plane_projection_uses_camera_facing_normal },
         { "plane_uses_configured_minimum_point_distance", &plane_uses_configured_minimum_point_distance },
         { "plane_rejects_nearly_collinear_points", &plane_rejects_nearly_collinear_points },
@@ -1349,6 +1399,7 @@ bool run_interaction_core_tests() {
         { "frame_clock_falls_back_to_the_host_clock_when_the_device_clock_is_stuck", &frame_clock_falls_back_to_the_host_clock_when_the_device_clock_is_stuck },
         { "frame_clock_switch_keeps_time_moving_forward", &frame_clock_switch_keeps_time_moving_forward },
         { "frame_clock_is_strictly_increasing", &frame_clock_is_strictly_increasing },
+        { "yaml_config_rejects_unknown_letter_selection", &yaml_config_rejects_unknown_letter_selection },
     } };
 
     bool all_passed = true;

@@ -26,6 +26,7 @@ add_library(aerial_touch_core STATIC
     src/depth_sampler.cpp
     src/fingertip_probe.cpp
     src/frame_clock.cpp
+    src/input_method.cpp
     src/plane.cpp
     src/keypad.cpp
     src/keypad_overlay.cpp
@@ -123,6 +124,7 @@ if(BUILD_TESTING)
     add_executable(aerial_touch_tests
         tests/test_depth_sampler.cpp
         tests/test_hud_text.cpp
+        tests/test_input_method.cpp
         tests/test_interaction_core.cpp
         tests/test_signal_stability.cpp
         src/utf8_text.cpp

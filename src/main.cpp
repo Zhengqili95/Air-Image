@@ -4,6 +4,7 @@
 #include "aerial_touch/depth_sampler.hpp"
 #include "aerial_touch/fingertip_probe.hpp"
 #include "aerial_touch/hand_tracker.hpp"
+#include "aerial_touch/input_method.hpp"
 #include "aerial_touch/keypad.hpp"
 #include "aerial_touch/keypad_overlay.hpp"
 #include "aerial_touch/orbbec_camera.hpp"
@@ -196,8 +197,88 @@ void draw_hand(cv::Mat& image, const aerial_touch::HandObservation& hand) {
     }
 }
 
+std::string key_display_name(const std::string& key) {
+    if(key == aerial_touch::kModeKey) {
+        return u8"切換";
+    }
+    if(key == aerial_touch::kDeleteKey) {
+        return u8"刪除";
+    }
+    return key;
+}
+
+// One line for the HUD and the console: the mode, the committed text, and whatever is still open.
+std::string input_status_text(const aerial_touch::InputMethod& input) {
+    constexpr std::size_t kVisibleCharacters = 32U;
+    const std::string& text = input.text();
+    std::string line = std::string(u8"輸入（") + aerial_touch::input_mode_name(input.mode()) + u8"）："
+                       + (text.size() > kVisibleCharacters ? "..." + text.substr(text.size() - kVisibleCharacters)
+                                                           : text);
+    if(const auto pending = input.pending_letter()) {
+        line += std::string("[") + *pending + "]";
+    }
+    // The cursor also makes a trailing space visible.
+    line += "|";
+    if(!input.candidates().empty()) {
+        line += u8"　選字：";
+        for(std::size_t index = 0; index < input.candidates().size(); ++index) {
+            line += std::to_string(index + 1U) + "=" + input.candidates()[index] + " ";
+        }
+    }
+    return line;
+}
+
+// Hover and press keep their colours; otherwise a key offered for selection stands out and a key
+// that does nothing right now recedes.
+cv::Scalar key_colour(const aerial_touch::KeypadKeyVisualState state,
+                      const aerial_touch::KeyLabel& label,
+                      const cv::Scalar idle) {
+    if(state == aerial_touch::KeypadKeyVisualState::Pressed) {
+        return { 80, 210, 80 };
+    }
+    if(state == aerial_touch::KeypadKeyVisualState::Hover) {
+        return { 20, 220, 255 };
+    }
+    if(label.candidate) {
+        return { 255, 110, 255 };
+    }
+    if(label.disabled) {
+        return { 110, 110, 110 };
+    }
+    return idle;
+}
+
+// Centres a key label on `centre`: the main text, and below it a smaller hint such as the letters
+// printed on a phone key.
+void draw_key_label(cv::Mat& image,
+                    const aerial_touch::KeyLabel& label,
+                    const cv::Point centre,
+                    const double scale,
+                    const cv::Scalar colour,
+                    const bool outlined) {
+    constexpr int kFont = cv::FONT_HERSHEY_SIMPLEX;
+    const double main_scale = label.main.size() > 1U ? scale * 0.75 : scale;
+    const double sub_scale = scale * 0.6;
+    int baseline = 0;
+    const cv::Size main_size = cv::getTextSize(label.main, kFont, main_scale, 2, &baseline);
+    const cv::Size sub_size = label.sub.empty() ? cv::Size{} : cv::getTextSize(label.sub, kFont, sub_scale, 1, &baseline);
+    const int gap = label.sub.empty() ? 0 : 5;
+    const int top = centre.y - (main_size.height + gap + sub_size.height) / 2;
+    const auto put = [&](const std::string& text, const cv::Point origin, const double text_scale, const int thickness) {
+        if(outlined) {
+            cv::putText(image, text, origin, kFont, text_scale, { 0, 0, 0 }, thickness + 2, cv::LINE_AA);
+        }
+        cv::putText(image, text, origin, kFont, text_scale, colour, thickness, cv::LINE_AA);
+    };
+    put(label.main, { centre.x - main_size.width / 2, top + main_size.height }, main_scale, 2);
+    if(!label.sub.empty()) {
+        put(label.sub, { centre.x - sub_size.width / 2, top + main_size.height + gap + sub_size.height }, sub_scale, 1);
+    }
+}
+
 void draw_keypad(cv::Mat& image,
                  const bool keypad_available,
+                 const aerial_touch::InputMethod& input,
                  const std::optional<std::string>& hovered_key,
                  const std::optional<std::string>& pressed_key) {
     if(!keypad_available) {
@@ -209,16 +290,12 @@ void draw_keypad(cv::Mat& image,
     for(const auto& region : layout.regions) {
         const cv::Rect rect{ origin_x + region.x_px, origin_y + region.y_px, region.width_px, region.height_px };
         const auto state = aerial_touch::keypad_key_visual_state(region.key, hovered_key, pressed_key);
+        const auto label = input.label(region.key);
         const bool filled = state != aerial_touch::KeypadKeyVisualState::Idle;
-        const cv::Scalar color = state == aerial_touch::KeypadKeyVisualState::Pressed
-                                     ? cv::Scalar{ 80, 210, 80 }
-                                     : state == aerial_touch::KeypadKeyVisualState::Hover
-                                         ? cv::Scalar{ 20, 220, 255 }
-                                         : cv::Scalar{ 230, 230, 230 };
-        const cv::Scalar text_color = filled ? cv::Scalar{ 0, 0, 0 } : cv::Scalar{ 255, 255, 255 };
-        cv::rectangle(image, rect, color, filled ? -1 : 2);
-        cv::putText(image, region.key, { rect.x + rect.width / 3, rect.y + 2 * rect.height / 3 },
-                    cv::FONT_HERSHEY_SIMPLEX, 0.65, text_color, 2, cv::LINE_AA);
+        const cv::Scalar colour = key_colour(state, label, { 230, 230, 230 });
+        cv::rectangle(image, rect, colour, filled ? -1 : 2);
+        draw_key_label(image, label, { rect.x + rect.width / 2, rect.y + rect.height / 2 }, 0.65,
+                       filled ? cv::Scalar{ 0, 0, 0 } : colour, !filled);
     }
 }
 
@@ -232,6 +309,7 @@ void draw_table_keypad(cv::Mat& image,
                        const aerial_touch::RgbdFrame& frame,
                        const aerial_touch::Plane& plane,
                        const aerial_touch::Keypad& keypad,
+                       const aerial_touch::InputMethod& input,
                        const std::optional<std::string>& hovered_key,
                        const std::optional<std::string>& pressed_key) {
     // A plane seen almost edge-on projects its far corners to enormous coordinates; clamping the
@@ -240,11 +318,16 @@ void draw_table_keypad(cv::Mat& image,
     constexpr float kMaximumDrawablePixel = 20000.0F;
 
     struct DrawableKey {
-        std::string key;
+        aerial_touch::KeyLabel label;
         std::vector<cv::Point> polygon;
         cv::Point centre;
         cv::Scalar color;
         aerial_touch::KeypadKeyVisualState state;
+
+        // Keys offered for selection are filled too, so the operator can see which ones to aim at.
+        bool emphasised() const {
+            return state != aerial_touch::KeypadKeyVisualState::Idle || label.candidate;
+        }
     };
 
     std::vector<DrawableKey> drawable;
@@ -281,23 +364,20 @@ void draw_table_keypad(cv::Mat& image,
         centre.y /= static_cast<int>(polygon.size());
 
         const auto state = aerial_touch::keypad_key_visual_state(region.key, hovered_key, pressed_key);
-        const cv::Scalar color = state == aerial_touch::KeypadKeyVisualState::Pressed
-                                     ? cv::Scalar{ 80, 210, 80 }
-                                     : state == aerial_touch::KeypadKeyVisualState::Hover
-                                           ? cv::Scalar{ 20, 220, 255 }
-                                           : cv::Scalar{ 210, 190, 90 };
-        drawable.push_back({ region.key, std::move(polygon), centre, color, state });
+        auto label = input.label(region.key);
+        const cv::Scalar color = key_colour(state, label, { 210, 190, 90 });
+        drawable.push_back({ std::move(label), std::move(polygon), centre, color, state });
     }
 
     // One clone and one blend for the whole overlay: cloning per key would copy the full frame up to
-    // ten times every frame.
+    // twelve times every frame.
     const bool any_highlight = std::any_of(drawable.begin(), drawable.end(), [](const DrawableKey& key) {
-        return key.state != aerial_touch::KeypadKeyVisualState::Idle;
+        return key.emphasised();
     });
     if(any_highlight) {
         cv::Mat highlight = image.clone();
         for(const auto& key : drawable) {
-            if(key.state != aerial_touch::KeypadKeyVisualState::Idle) {
+            if(key.emphasised()) {
                 cv::fillConvexPoly(highlight, key.polygon.data(), static_cast<int>(key.polygon.size()),
                                    key.color, cv::LINE_AA);
             }
@@ -306,11 +386,8 @@ void draw_table_keypad(cv::Mat& image,
     }
 
     for(const auto& key : drawable) {
-        cv::polylines(image, key.polygon, true, key.color,
-                      key.state == aerial_touch::KeypadKeyVisualState::Idle ? 1 : 2, cv::LINE_AA);
-        const cv::Point label{ key.centre.x - 7, key.centre.y + 7 };
-        cv::putText(image, key.key, label, cv::FONT_HERSHEY_SIMPLEX, 0.6, { 0, 0, 0 }, 3, cv::LINE_AA);
-        cv::putText(image, key.key, label, cv::FONT_HERSHEY_SIMPLEX, 0.6, key.color, 1, cv::LINE_AA);
+        cv::polylines(image, key.polygon, true, key.color, key.emphasised() ? 2 : 1, cv::LINE_AA);
+        draw_key_label(image, key.label, key.centre, 0.6, key.color, true);
     }
 }
 
@@ -323,6 +400,7 @@ int main(int argc, char** argv) {
         auto config = aerial_touch::load_app_config(options.config);
         std::optional<aerial_touch::Keypad> keypad;
         aerial_touch::TouchStateMachine touch(config.touch);
+        aerial_touch::InputMethod input_method(config.input);
         aerial_touch::HandSignalStabilizer fingertip_stabilizer(
             { { config.fingertip.min_cutoff_hz, config.fingertip.beta, config.fingertip.derivative_cutoff_hz },
               config.fingertip.display_hold_ms });
@@ -701,11 +779,14 @@ int main(int argc, char** argv) {
                 if(event.has_value()) {
                     last_event = event;
                     active_pressed_key = event->key;
-                    std::cout << u8"按鍵事件 按鍵=" << event->key << u8" 時間戳記毫秒=" << event->timestamp_ms
+                    input_method.press(event->key, event->timestamp_ms);
+                    std::cout << u8"按鍵事件 按鍵=" << key_display_name(event->key)
+                              << u8" 時間戳記毫秒=" << event->timestamp_ms
                               << u8" 指尖XYZ毫米=(" << vec3_text(event->fingertip_xyz_mm) << u8") 平面UV毫米=("
                               << vec2_text(event->plane_uv_mm) << u8") 原始距離毫米="
                               << (raw_distance.has_value() ? std::to_string(*raw_distance) : "N/A")
-                              << u8" 濾波距離毫米=" << *current_distance << "\n";
+                              << u8" 濾波距離毫米=" << *current_distance << "\n"
+                              << input_status_text(input_method) << "\n";
                 }
                 if(touch.armed()) {
                     active_pressed_key.reset();
@@ -716,6 +797,9 @@ int main(int argc, char** argv) {
                 sticky_key.reset();
                 active_pressed_key.reset();
             }
+            // Runs every frame, not only on presses: a multi-tap letter commits after a pause, and the
+            // pause is exactly when no press arrives.
+            input_method.tick(frame->timestamp_ms);
 
             ++fps_frames;
             const auto now = std::chrono::steady_clock::now();
@@ -730,9 +814,9 @@ int main(int argc, char** argv) {
                 active_pressed_key, touch.armed(), current_uv.has_value() && confirmed_tip, calibrating, current_key);
             const std::optional<std::string> pressed_key = active_pressed_key;
             if(plane.has_value() && keypad.has_value() && !calibrating) {
-                draw_table_keypad(display, camera, *frame, *plane, *keypad, current_key, pressed_key);
+                draw_table_keypad(display, camera, *frame, *plane, *keypad, input_method, current_key, pressed_key);
             }
-            draw_keypad(display, keypad.has_value(), current_key, pressed_key);
+            draw_keypad(display, keypad.has_value(), input_method, current_key, pressed_key);
             {
                 aerial_touch::Utf8TextCanvas canvas(display);
                 text_line(canvas, std::string(u8"主程式 FPS：") + std::to_string(static_cast<int>(std::lround(fps)))
@@ -814,8 +898,13 @@ int main(int argc, char** argv) {
                     text_line(canvas, std::string(u8"相機警告：") + camera_info.warnings.back(), 11,
                               { 80, 180, 255 });
                 }
-                if(last_event.has_value()) {
-                    text_line(canvas, std::string(u8"最近按鍵：") + last_event->key, 12, { 50, 255, 255 });
+                // Shares row 12 with the last key rather than taking a row of its own: at 480p rows
+                // past 13 fall off the bottom of the frame.
+                if(keypad.has_value() || last_event.has_value()) {
+                    const std::string last_key_text =
+                        last_event.has_value() ? std::string(u8"最近按鍵：") + key_display_name(last_event->key) + u8"　"
+                                               : std::string();
+                    text_line(canvas, last_key_text + input_status_text(input_method), 12, { 50, 255, 255 });
                 }
                 // One compact line instead of one row per point: at 480p the old layout started at
                 // row 13 (y = 452) and every spread readout fell off the bottom of the frame, so the
@@ -934,6 +1023,8 @@ int main(int argc, char** argv) {
                 camera.reset_depth_filters();
                 sticky_key.reset();
                 active_pressed_key.reset();
+                last_event.reset();
+                input_method.reset();
                 status = u8"重設完成；按 C 重新設定數字鍵盤範圍";
             }
         }

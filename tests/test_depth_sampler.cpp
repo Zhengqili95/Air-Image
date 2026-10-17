@@ -6,6 +6,7 @@
 
 bool run_interaction_core_tests();
 bool run_hud_text_tests();
+bool run_input_method_tests();
 bool run_signal_stability_tests();
 
 namespace {
@@ -72,6 +73,7 @@ int main() {
     passed = surface_grid_stays_inside_its_disc_and_skips_excluded_points() && passed;
     passed = run_interaction_core_tests() && passed;
     passed = run_hud_text_tests() && passed;
+    passed = run_input_method_tests() && passed;
     passed = run_signal_stability_tests() && passed;
     return passed ? 0 : 1;
 }
