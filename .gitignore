@@ -8,3 +8,6 @@
 /.superpowers/
 *.user
 *.log
+# Machine-specific settings that must stay on each computer.
+CMakeUserPresets.json
+LOCAL_SETUP.md
