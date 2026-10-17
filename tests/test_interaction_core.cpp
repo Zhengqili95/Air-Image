@@ -5,6 +5,7 @@
 #include "aerial_touch/calibration_geometry.hpp"
 #include "aerial_touch/depth_sampler.hpp"
 #include "aerial_touch/fingertip_probe.hpp"
+#include "aerial_touch/frame_clock.hpp"
 #include "aerial_touch/keypad.hpp"
 #include "aerial_touch/hand_tracker.hpp"
 #include "aerial_touch/plane.hpp"
@@ -767,6 +768,46 @@ bool unavailable_hardware_d2c_uses_software_alignment() {
     return aerial_touch::choose_alignment_mode(false) == aerial_touch::AlignmentMode::Software;
 }
 
+// A device clock that advances is used as-is, so captures keep their true spacing.
+bool frame_clock_uses_an_advancing_device_clock() {
+    aerial_touch::FrameClock clock;
+    const auto first = clock.next(1'000'000U, 50'000'000U);
+    const auto second = clock.next(1'033'000U, 50'040'000U);
+    return first == 1000 && second == 1033 && !clock.using_host_clock();
+}
+
+// Regression: on Windows without registered UVC metadata the device timestamp never moves. Every
+// frame then carried the same time, MediaPipe's VIDEO mode rejected all of them (no hand was ever
+// tracked) and the surface scan's timeout could never elapse.
+bool frame_clock_falls_back_to_the_host_clock_when_the_device_clock_is_stuck() {
+    aerial_touch::FrameClock clock;
+    const auto first = clock.next(0U, 50'000'000U);
+    const auto second = clock.next(0U, 50'033'000U);
+    const auto third = clock.next(0U, 50'066'000U);
+    return clock.using_host_clock() && second - first == 33 && third - second == 33;
+}
+
+// Switching clocks mid-session must continue the timeline rather than jump to the host clock's
+// smaller absolute value, which would stall time at one millisecond per frame.
+bool frame_clock_switch_keeps_time_moving_forward() {
+    aerial_touch::FrameClock clock;
+    const auto device_a = clock.next(900'000'000U, 1'000'000U);
+    const auto device_b = clock.next(900'033'000U, 1'033'000U);
+    const auto host_a = clock.next(900'033'000U, 1'066'000U);
+    const auto host_b = clock.next(900'033'000U, 1'099'000U);
+    return clock.using_host_clock() && device_b > device_a && host_a > device_b && host_b - host_a == 33;
+}
+
+// Two frames inside one millisecond, or a clock stepping backwards, must still yield a later time.
+bool frame_clock_is_strictly_increasing() {
+    aerial_touch::FrameClock clock;
+    const auto a = clock.next(5'000'100U, 0U);
+    const auto b = clock.next(5'000'900U, 0U);
+    const auto c = clock.next(0U, 10'000'000U);
+    const auto d = clock.next(0U, 9'000'000U);
+    return a < b && b < c && c < d;
+}
+
 }  // namespace
 
 // --- camera model -----------------------------------------------------------------------------
@@ -1237,7 +1278,7 @@ bool config_change_discards_stale_approach_evidence() {
 bool run_interaction_core_tests() {
     // Every case runs and names itself on failure. The old form was one long && chain, so the first
     // failure short-circuited the rest and the suite reported nothing but a non-zero exit code.
-    const std::array<std::pair<const char*, bool (*)()>, 66> tests{ {
+    const std::array<std::pair<const char*, bool (*)()>, 70> tests{ {
         { "plane_projection_uses_camera_facing_normal", &plane_projection_uses_camera_facing_normal },
         { "plane_uses_configured_minimum_point_distance", &plane_uses_configured_minimum_point_distance },
         { "plane_rejects_nearly_collinear_points", &plane_rejects_nearly_collinear_points },
@@ -1304,6 +1345,10 @@ bool run_interaction_core_tests() {
         { "settings_layout_adapts_to_window_size", &settings_layout_adapts_to_window_size },
         { "rgbd_frame_validates_alignment_and_buffer_sizes", &rgbd_frame_validates_alignment_and_buffer_sizes },
         { "unavailable_hardware_d2c_uses_software_alignment", &unavailable_hardware_d2c_uses_software_alignment },
+        { "frame_clock_uses_an_advancing_device_clock", &frame_clock_uses_an_advancing_device_clock },
+        { "frame_clock_falls_back_to_the_host_clock_when_the_device_clock_is_stuck", &frame_clock_falls_back_to_the_host_clock_when_the_device_clock_is_stuck },
+        { "frame_clock_switch_keeps_time_moving_forward", &frame_clock_switch_keeps_time_moving_forward },
+        { "frame_clock_is_strictly_increasing", &frame_clock_is_strictly_increasing },
     } };
 
     bool all_passed = true;

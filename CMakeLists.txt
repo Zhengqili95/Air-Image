@@ -25,6 +25,7 @@ add_library(aerial_touch_core STATIC
     src/camera_projection.cpp
     src/depth_sampler.cpp
     src/fingertip_probe.cpp
+    src/frame_clock.cpp
     src/plane.cpp
     src/keypad.cpp
     src/keypad_overlay.cpp

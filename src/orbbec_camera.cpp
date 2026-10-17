@@ -1,12 +1,14 @@
 #include "aerial_touch/orbbec_camera.hpp"
 #include "aerial_touch/alignment_mode.hpp"
 #include "aerial_touch/camera_projection.hpp"
+#include "aerial_touch/frame_clock.hpp"
 
 #include <libobsensor/ObSensor.hpp>
 #include <libobsensor/hpp/Utils.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <exception>
 #include <sstream>
@@ -208,6 +210,9 @@ struct OrbbecCamera::Impl {
     bool reported_intrinsic_mismatch{ false };
     std::string error;
     CameraRuntimeInfo runtime_info;
+    // Deliberately survives stop()/start(): MediaPipe's tracker lives across camera restarts and
+    // rejects any timestamp that is not larger than the last one it saw.
+    FrameClock frame_clock;
 };
 
 OrbbecCamera::OrbbecCamera() : impl_(std::make_unique<Impl>()) {}
@@ -574,7 +579,15 @@ std::optional<RgbdFrame> OrbbecCamera::capture(const std::uint32_t timeout_ms) {
         frame.color_height = static_cast<int>(color->getHeight());
         frame.depth_width = static_cast<int>(depth->getWidth());
         frame.depth_height = static_cast<int>(depth->getHeight());
-        frame.timestamp_ms = static_cast<std::int64_t>(color->getTimeStampUs() / 1000U);
+        const auto host_us = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                            std::chrono::steady_clock::now().time_since_epoch())
+                                                            .count());
+        const bool was_using_host_clock = impl_->frame_clock.using_host_clock();
+        frame.timestamp_ms = impl_->frame_clock.next(color->getTimeStampUs(), host_us);
+        if(!was_using_host_clock && impl_->frame_clock.using_host_clock()) {
+            add_warning(impl_->runtime_info,
+                        u8"相機硬體時間戳記未前進（Windows 尚未註冊 UVC metadata），已改用主機時間");
+        }
         frame.depth_unit_mm = depth->getValueScale();
 
         if(static_cast<int>(raw_depth->getWidth()) != frame.depth_width
