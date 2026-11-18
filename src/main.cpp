@@ -1255,6 +1255,13 @@ int main(int argc, char** argv) {
                         calibration_spreads.clear();
                         calibration_collector.clear();
                         keypad.reset();
+                        if(attempt.failure == aerial_touch::KeypadCalibrationFailure::AmbiguousUserSide) {
+                            // The accumulated finger directions are what failed. Kept, they would
+                            // include every frame of the plane trace and outweigh the corrected pose
+                            // the retry asks for, so the retry could fail the same way.
+                            user_side_sum = {};
+                            user_side_samples = 0U;
+                        }
                         status = calibration_failure_text(attempt.failure)
                                  + u8"；表面基準已保留，請從 1 鍵左上角重新取樣";
                     }
