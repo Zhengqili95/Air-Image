@@ -26,9 +26,11 @@ Windows 原生 C++ 原型：Orbbec Gemini 2 RGB-D、MediaPipe Hand Landmarker、
 - 另有 dwell 觸發：停留在觸控門檻內達 `dwell_ms` 即送出按鍵，補足過慢而無法通過速度閘門的按壓；設 0 可關閉。
 - OpenCV 顯示實際深度模式／精度／FPS／D2C、raw／filtered 距離、接近／停留狀態、校正散布與最近事件。
 - `S` 開啟原生參數設定視窗，可調整主要互動參數、相機深度工作模式／精度／FPS、即時預覽距離並套用保存；三個相機欄位只列出目前 Gemini 2 由 SDK 回報可用的選項，不再接受任意模式名稱或顯示裝置不支援的精度／FPS。其餘相機與濾波進階項目先以 YAML 設定。
-- **俯視模式（擺法 A）**：`camera.mounting: overhead` 時，Gemini 2 在垂直的空中鍵盤面正上方往下看。詳見下方「俯視模式」。
+- **俯視模式**：`camera.mounting: overhead` 時，Gemini 2 在垂直的空中鍵盤面正上方往下看。詳見下方「俯視模式」。
 
-## 俯視模式（擺法 A：相機在空中鍵盤面正上方）
+## 俯視模式（相機在空中鍵盤面正上方）
+
+這個模式對應的硬體擺法：顯示器平放在桌上、ASKA3D 板斜放 45° 架在顯示器上方，空中成出一個垂直的鍵盤影像；Gemini 2 放在這個影像的正上方往下看。
 
 在 `config/default.yaml` 設 `camera.mounting: overhead`（預設 `front` 是相機正對鍵盤面的桌面版）。這個擺法下，深度決定「哪一列」，影像中的前後位移決定「有沒有碰到」。與正對模式的差別：
 
