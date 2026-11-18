@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aerial_touch/camera_settings.hpp"
+#include "aerial_touch/hand_tracker.hpp"
 #include "aerial_touch/input_method.hpp"
 #include "aerial_touch/keypad.hpp"
 #include "aerial_touch/touch_state_machine.hpp"
@@ -8,8 +9,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <string>
 
 namespace aerial_touch {
+
+// Where the camera sits relative to the keypad plane.
+//
+// Front: the camera faces the keypad surface (the desk / paper prototype). The plane is found by
+// scanning the surface's depth, and the touch distance is mostly a depth reading.
+//
+// Overhead: the camera looks straight down onto a vertical aerial image. The plane is seen
+// edge-on, so it cannot be scanned and contains the camera, which leaves "towards the camera"
+// useless for orienting its normal. Calibration traces the plane with the fingertip instead, the
+// normal points to the side the hand is on, and the touch distance comes mostly from the image.
+enum class CameraMounting {
+    Front,
+    Overhead,
+};
+
+const char* camera_mounting_name(CameraMounting mounting);
+std::optional<CameraMounting> parse_camera_mounting(const std::string& text);
 
 struct DepthSamplingConfig {
     int sample_radius{ 2 };
@@ -42,6 +62,19 @@ struct FingertipConfig {
     // finger's silhouette edge, so its depth mixes finger and background.
     float depth_probe_near_ratio{ 0.35F };
     float depth_probe_far_ratio{ 0.70F };
+    // Overhead mounting only. Pixels within this depth of the finger's probe depth count as finger
+    // when locating the fingertip's leading edge; seen from above, the background lies far below.
+    float depth_segment_window_mm{ 25.0F };
+    // The fingertip's leading edge is the frontmost slice across the finger still at least this
+    // fraction of the finger's width, so a few flying pixels at the silhouette cannot drag it forward.
+    float edge_width_ratio{ 0.3F };
+    // Overhead mounting only: One Euro smoothing of the fingertip's 3D position in millimetres
+    // (beta is per mm/s), so the top and bottom keys are smoothed alike.
+    float position_min_cutoff_hz{ 1.0F };
+    float position_beta{ 0.05F };
+    // Overhead mounting only: how long the finger may be followed in the depth image alone after
+    // MediaPipe last saw the hand. 0 turns depth following off.
+    std::int64_t depth_coast_ms{ 1000 };
 };
 
 struct CalibrationConfig {
@@ -52,9 +85,11 @@ struct CalibrationConfig {
 };
 
 struct AppConfig {
+    CameraMounting mounting{ CameraMounting::Front };
     CameraConfig camera;
     DepthSamplingConfig depth;
     FingertipConfig fingertip;
+    HandTrackingConfig hand_tracking;
     TouchConfig touch;
     KeypadConfig keypad;
     CalibrationConfig calibration;

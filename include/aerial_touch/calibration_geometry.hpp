@@ -34,6 +34,9 @@ enum class KeypadCalibrationFailure {
     InvalidPlane,
     InvalidDimensions,
     BottomPointOutsideKeypad,
+    // A user-side hint was given but lies almost in the plane, so it cannot say which side the
+    // hand is on.
+    AmbiguousUserSide,
 };
 
 struct KeypadCalibrationAttempt {
@@ -41,9 +44,11 @@ struct KeypadCalibrationAttempt {
     KeypadCalibrationFailure failure{ KeypadCalibrationFailure::None };
 };
 
+// `user_side_hint` is passed through to `Plane::from_calibration_points`; see there.
 KeypadCalibrationAttempt calibrate_keypad_detailed(
     const std::array<Vec3, kKeypadCalibrationPointCount>& points,
-    float minimum_point_distance_mm = 80.0F);
+    float minimum_point_distance_mm = 80.0F,
+    std::optional<Vec3> user_side_hint = std::nullopt);
 
 std::optional<KeypadCalibrationResult> calibrate_keypad(
     const std::array<Vec3, kKeypadCalibrationPointCount>& points,

@@ -15,19 +15,24 @@ namespace aerial_touch {
 struct HandTracker::Impl {
 #if defined(_WIN32)
     using CreateFn = void* (*)(const char*, char*, int);
+    using CreateWithOptionsFn = void* (*)(const char*, float, float, float, char*, int);
     using DetectFn = int (*)(void*, const unsigned char*, int, int, int, std::int64_t, mphb_result*, char*, int);
     using DestroyFn = void (*)(void*);
 
     HMODULE module{ nullptr };
     CreateFn create{ nullptr };
+    CreateWithOptionsFn create_with_options{ nullptr };
     DetectFn detect{ nullptr };
     DestroyFn destroy{ nullptr };
     void* handle{ nullptr };
 #endif
     std::string error;
+    std::string warning;
 };
 
-HandTracker::HandTracker(const std::filesystem::path& dll_path, const std::filesystem::path& model_path)
+HandTracker::HandTracker(const std::filesystem::path& dll_path,
+                         const std::filesystem::path& model_path,
+                         const HandTrackingConfig tracking)
     : impl_(std::make_unique<Impl>()) {
 #if defined(_WIN32)
     impl_->module = LoadLibraryW(dll_path.c_str());
@@ -39,6 +44,9 @@ HandTracker::HandTracker(const std::filesystem::path& dll_path, const std::files
     impl_->create  = reinterpret_cast<Impl::CreateFn>(GetProcAddress(impl_->module, "mphb_create"));
     impl_->detect  = reinterpret_cast<Impl::DetectFn>(GetProcAddress(impl_->module, "mphb_detect_rgb"));
     impl_->destroy = reinterpret_cast<Impl::DestroyFn>(GetProcAddress(impl_->module, "mphb_destroy"));
+    // Optional: bridges built before the thresholds were configurable do not export it.
+    impl_->create_with_options =
+        reinterpret_cast<Impl::CreateWithOptionsFn>(GetProcAddress(impl_->module, "mphb_create_with_options"));
     if(impl_->create == nullptr || impl_->detect == nullptr || impl_->destroy == nullptr) {
         impl_->error = u8"MediaPipe 手部追蹤橋接 DLL 缺少必要的匯出函式";
         FreeLibrary(impl_->module);
@@ -48,7 +56,21 @@ HandTracker::HandTracker(const std::filesystem::path& dll_path, const std::files
 
     std::array<char, 512> error_buffer{};
     const std::string model_utf8 = model_path.string();
-    impl_->handle = impl_->create(model_utf8.c_str(), error_buffer.data(), static_cast<int>(error_buffer.size()));
+    const bool default_thresholds = tracking.min_detection_confidence == 0.5F
+                                    && tracking.min_presence_confidence == 0.5F
+                                    && tracking.min_tracking_confidence == 0.5F;
+    if(impl_->create_with_options != nullptr) {
+        impl_->handle = impl_->create_with_options(
+            model_utf8.c_str(), tracking.min_detection_confidence, tracking.min_presence_confidence,
+            tracking.min_tracking_confidence, error_buffer.data(), static_cast<int>(error_buffer.size()));
+    }
+    else {
+        impl_->handle =
+            impl_->create(model_utf8.c_str(), error_buffer.data(), static_cast<int>(error_buffer.size()));
+        if(!default_thresholds) {
+            impl_->warning = u8"MediaPipe 橋接 DLL 是舊版，hand_tracking 信心門檻未生效（仍為 0.5）；請重新建置 bridge";
+        }
+    }
     if(impl_->handle == nullptr) {
         impl_->error = error_buffer.data();
         if(impl_->error.empty()) {
@@ -58,6 +80,7 @@ HandTracker::HandTracker(const std::filesystem::path& dll_path, const std::files
 #else
     (void)dll_path;
     (void)model_path;
+    (void)tracking;
     impl_->error = u8"MediaPipe 手部追蹤橋接程式目前僅支援 Windows 動態載入";
 #endif
 }
@@ -86,6 +109,10 @@ bool HandTracker::available() const {
 
 const std::string& HandTracker::error() const {
     return impl_->error;
+}
+
+const std::string& HandTracker::warning() const {
+    return impl_->warning;
 }
 
 HandObservation HandTracker::detect_rgb(const unsigned char* rgb,

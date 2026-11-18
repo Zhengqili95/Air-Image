@@ -20,10 +20,20 @@ bool finite(const PlanePoint point) {
 
 KeypadCalibrationAttempt calibrate_keypad_detailed(
     const std::array<Vec3, kKeypadCalibrationPointCount>& points,
-    const float minimum_point_distance_mm) {
+    const float minimum_point_distance_mm,
+    const std::optional<Vec3> user_side_hint) {
     const auto plane = Plane::from_calibration_points(points[kKeypadOriginPoint], points[kKeypadTopRightPoint],
-                                                      points[kKeypadBottomPoint], minimum_point_distance_mm);
+                                                      points[kKeypadBottomPoint], minimum_point_distance_mm,
+                                                      user_side_hint);
     if(!plane.has_value()) {
+        // Tell an undecidable side apart from bad points: the remedy is different (point the finger
+        // at the plane, rather than re-aim the corners).
+        if(user_side_hint.has_value()
+           && Plane::from_calibration_points(points[kKeypadOriginPoint], points[kKeypadTopRightPoint],
+                                             points[kKeypadBottomPoint], minimum_point_distance_mm)
+                  .has_value()) {
+            return { std::nullopt, KeypadCalibrationFailure::AmbiguousUserSide };
+        }
         return { std::nullopt, KeypadCalibrationFailure::InvalidPlane };
     }
 

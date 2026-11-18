@@ -30,6 +30,42 @@ private:
     std::optional<std::int64_t> previous_timestamp_ms_;
 };
 
+// The same filter over a 3D point, in millimetres. Filtering in pixels makes the smoothing depend
+// on how far the hand is: one pixel is about 0.9 mm at 30 cm and 1.3 mm at 45 cm, so a filter tuned
+// for the top keys under-smooths the bottom ones. Filtering the camera-space point in millimetres
+// gives every key the same smoothing.
+class OneEuroFilter3D {
+public:
+    explicit OneEuroFilter3D(OneEuroConfig config = {});
+
+    Vec3 update(Vec3 value, std::int64_t timestamp_ms);
+    void reset();
+
+private:
+    OneEuroConfig config_;
+    std::optional<Vec3> previous_raw_;
+    std::optional<Vec3> previous_filtered_;
+    Vec3 filtered_derivative_{};
+    std::optional<std::int64_t> previous_timestamp_ms_;
+};
+
+// Standard deviation of each component over the last `capacity` samples, for the HUD's jitter
+// readout: how much the fingertip moves while it is held still is the number that says whether
+// the lower rows can be told apart.
+class RollingSpread {
+public:
+    explicit RollingSpread(std::size_t capacity = 30U);
+
+    void add(Vec3 value);
+    void clear();
+    std::size_t size() const;
+    std::optional<Vec3> standard_deviation() const;
+
+private:
+    std::size_t capacity_{};
+    std::deque<Vec3> values_;
+};
+
 struct HandSignalConfig {
     OneEuroConfig filter;
     std::int64_t display_hold_ms{ 100 };

@@ -35,6 +35,20 @@ T optional_value(const YAML::Node& root, const char* section, const char* key, c
 
 }  // namespace
 
+const char* camera_mounting_name(const CameraMounting mounting) {
+    return mounting == CameraMounting::Overhead ? "overhead" : "front";
+}
+
+std::optional<CameraMounting> parse_camera_mounting(const std::string& text) {
+    if(text == "front") {
+        return CameraMounting::Front;
+    }
+    if(text == "overhead") {
+        return CameraMounting::Overhead;
+    }
+    return std::nullopt;
+}
+
 void validate_app_config(const AppConfig& config) {
     if(config.camera.preferred_fps <= 0
        || (config.camera.rgb_power_line_frequency_hz != 50 && config.camera.rgb_power_line_frequency_hz != 60)
@@ -55,6 +69,19 @@ void validate_app_config(const AppConfig& config) {
        || config.fingertip.depth_probe_near_ratio <= 0.0F
        || config.fingertip.depth_probe_far_ratio <= config.fingertip.depth_probe_near_ratio
        || config.fingertip.depth_probe_far_ratio > 1.0F
+       || !std::isfinite(config.fingertip.depth_segment_window_mm)
+       || config.fingertip.depth_segment_window_mm <= 0.0F
+       || !std::isfinite(config.fingertip.edge_width_ratio)
+       || config.fingertip.edge_width_ratio <= 0.0F || config.fingertip.edge_width_ratio > 1.0F
+       || !std::isfinite(config.fingertip.position_min_cutoff_hz) || config.fingertip.position_min_cutoff_hz <= 0.0F
+       || !std::isfinite(config.fingertip.position_beta) || config.fingertip.position_beta < 0.0F
+       || config.fingertip.depth_coast_ms < 0
+       || !std::isfinite(config.hand_tracking.min_detection_confidence)
+       || !std::isfinite(config.hand_tracking.min_presence_confidence)
+       || !std::isfinite(config.hand_tracking.min_tracking_confidence)
+       || config.hand_tracking.min_detection_confidence <= 0.0F || config.hand_tracking.min_detection_confidence > 1.0F
+       || config.hand_tracking.min_presence_confidence <= 0.0F || config.hand_tracking.min_presence_confidence > 1.0F
+       || config.hand_tracking.min_tracking_confidence <= 0.0F || config.hand_tracking.min_tracking_confidence > 1.0F
        || config.touch.dwell_ms < 0
        || !std::isfinite(config.touch.touch_threshold_mm)
        || !std::isfinite(config.touch.release_threshold_mm)
@@ -80,6 +107,13 @@ AppConfig load_app_config(const std::filesystem::path& path) {
     const YAML::Node root = YAML::LoadFile(path.string());
 
     AppConfig config;
+    const auto mounting =
+        optional_value<std::string>(root, "camera", "mounting", camera_mounting_name(config.mounting));
+    const auto parsed_mounting = parse_camera_mounting(mounting);
+    if(!parsed_mounting.has_value()) {
+        throw std::runtime_error(std::string(u8"無效的相機擺法：") + mounting + u8"（只能是 front 或 overhead）");
+    }
+    config.mounting = *parsed_mounting;
     config.camera.depth_work_mode =
         optional_value<std::string>(root, "camera", "depth_work_mode", config.camera.depth_work_mode);
     config.camera.depth_precision =
@@ -122,6 +156,22 @@ AppConfig load_app_config(const std::filesystem::path& path) {
         optional_value<float>(root, "fingertip", "depth_probe_near_ratio", config.fingertip.depth_probe_near_ratio);
     config.fingertip.depth_probe_far_ratio =
         optional_value<float>(root, "fingertip", "depth_probe_far_ratio", config.fingertip.depth_probe_far_ratio);
+    config.fingertip.depth_segment_window_mm = optional_value<float>(
+        root, "fingertip", "depth_segment_window_mm", config.fingertip.depth_segment_window_mm);
+    config.fingertip.edge_width_ratio =
+        optional_value<float>(root, "fingertip", "edge_width_ratio", config.fingertip.edge_width_ratio);
+    config.fingertip.position_min_cutoff_hz = optional_value<float>(
+        root, "fingertip", "position_min_cutoff_hz", config.fingertip.position_min_cutoff_hz);
+    config.fingertip.position_beta =
+        optional_value<float>(root, "fingertip", "position_beta", config.fingertip.position_beta);
+    config.fingertip.depth_coast_ms =
+        optional_value<std::int64_t>(root, "fingertip", "depth_coast_ms", config.fingertip.depth_coast_ms);
+    config.hand_tracking.min_detection_confidence = optional_value<float>(
+        root, "hand_tracking", "min_detection_confidence", config.hand_tracking.min_detection_confidence);
+    config.hand_tracking.min_presence_confidence = optional_value<float>(
+        root, "hand_tracking", "min_presence_confidence", config.hand_tracking.min_presence_confidence);
+    config.hand_tracking.min_tracking_confidence = optional_value<float>(
+        root, "hand_tracking", "min_tracking_confidence", config.hand_tracking.min_tracking_confidence);
     config.touch.touch_threshold_mm = required_value<float>(root, "touch", "touch_threshold_mm");
     config.touch.release_threshold_mm = required_value<float>(root, "touch", "release_threshold_mm");
     config.touch.min_approach_velocity_mm_s =
@@ -163,6 +213,7 @@ void save_app_config(const AppConfig& config, const std::filesystem::path& path)
     YAML::Emitter emitter;
     emitter << YAML::BeginMap;
     emitter << YAML::Key << "camera" << YAML::Value << YAML::BeginMap;
+    emitter << YAML::Key << "mounting" << YAML::Value << camera_mounting_name(config.mounting);
     emitter << YAML::Key << "depth_work_mode" << YAML::Value << config.camera.depth_work_mode;
     emitter << YAML::Key << "depth_precision" << YAML::Value << config.camera.depth_precision;
     emitter << YAML::Key << "preferred_fps" << YAML::Value << config.camera.preferred_fps;
@@ -190,6 +241,17 @@ void save_app_config(const AppConfig& config, const std::filesystem::path& path)
     emitter << YAML::Key << "display_hold_ms" << YAML::Value << config.fingertip.display_hold_ms;
     emitter << YAML::Key << "depth_probe_near_ratio" << YAML::Value << config.fingertip.depth_probe_near_ratio;
     emitter << YAML::Key << "depth_probe_far_ratio" << YAML::Value << config.fingertip.depth_probe_far_ratio;
+    emitter << YAML::Key << "depth_segment_window_mm" << YAML::Value << config.fingertip.depth_segment_window_mm;
+    emitter << YAML::Key << "edge_width_ratio" << YAML::Value << config.fingertip.edge_width_ratio;
+    emitter << YAML::Key << "position_min_cutoff_hz" << YAML::Value << config.fingertip.position_min_cutoff_hz;
+    emitter << YAML::Key << "position_beta" << YAML::Value << config.fingertip.position_beta;
+    emitter << YAML::Key << "depth_coast_ms" << YAML::Value << config.fingertip.depth_coast_ms;
+    emitter << YAML::EndMap;
+    emitter << YAML::Key << "hand_tracking" << YAML::Value << YAML::BeginMap;
+    emitter << YAML::Key << "min_detection_confidence" << YAML::Value
+            << config.hand_tracking.min_detection_confidence;
+    emitter << YAML::Key << "min_presence_confidence" << YAML::Value << config.hand_tracking.min_presence_confidence;
+    emitter << YAML::Key << "min_tracking_confidence" << YAML::Value << config.hand_tracking.min_tracking_confidence;
     emitter << YAML::EndMap;
     emitter << YAML::Key << "touch" << YAML::Value << YAML::BeginMap;
     emitter << YAML::Key << "touch_threshold_mm" << YAML::Value << config.touch.touch_threshold_mm;

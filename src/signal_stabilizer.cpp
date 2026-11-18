@@ -76,6 +76,97 @@ void OneEuroFilter2D::reset() {
     filtered_derivative_ = {};
 }
 
+OneEuroFilter3D::OneEuroFilter3D(const OneEuroConfig config) : config_(config) {
+    if(!std::isfinite(config_.min_cutoff_hz) || config_.min_cutoff_hz <= 0.0F
+       || !std::isfinite(config_.beta) || config_.beta < 0.0F
+       || !std::isfinite(config_.derivative_cutoff_hz) || config_.derivative_cutoff_hz <= 0.0F) {
+        throw std::invalid_argument(u8"One Euro 濾波器設定無效");
+    }
+}
+
+Vec3 OneEuroFilter3D::update(const Vec3 value, const std::int64_t timestamp_ms) {
+    if(!previous_raw_.has_value() || !previous_filtered_.has_value() || !previous_timestamp_ms_.has_value()
+       || timestamp_ms <= *previous_timestamp_ms_) {
+        previous_raw_ = value;
+        previous_filtered_ = value;
+        filtered_derivative_ = {};
+        previous_timestamp_ms_ = timestamp_ms;
+        return value;
+    }
+
+    const float elapsed_seconds = static_cast<float>(timestamp_ms - *previous_timestamp_ms_) / 1000.0F;
+    const float derivative_alpha = smoothing_alpha(config_.derivative_cutoff_hz, elapsed_seconds);
+    filtered_derivative_.x =
+        low_pass((value.x - previous_raw_->x) / elapsed_seconds, filtered_derivative_.x, derivative_alpha);
+    filtered_derivative_.y =
+        low_pass((value.y - previous_raw_->y) / elapsed_seconds, filtered_derivative_.y, derivative_alpha);
+    filtered_derivative_.z =
+        low_pass((value.z - previous_raw_->z) / elapsed_seconds, filtered_derivative_.z, derivative_alpha);
+
+    const auto component = [&](const float raw, const float previous, const float derivative) {
+        const float cutoff = config_.min_cutoff_hz + config_.beta * std::fabs(derivative);
+        return low_pass(raw, previous, smoothing_alpha(cutoff, elapsed_seconds));
+    };
+    const Vec3 filtered{
+        component(value.x, previous_filtered_->x, filtered_derivative_.x),
+        component(value.y, previous_filtered_->y, filtered_derivative_.y),
+        component(value.z, previous_filtered_->z, filtered_derivative_.z),
+    };
+
+    previous_raw_ = value;
+    previous_filtered_ = filtered;
+    previous_timestamp_ms_ = timestamp_ms;
+    return filtered;
+}
+
+void OneEuroFilter3D::reset() {
+    previous_raw_.reset();
+    previous_filtered_.reset();
+    previous_timestamp_ms_.reset();
+    filtered_derivative_ = {};
+}
+
+RollingSpread::RollingSpread(const std::size_t capacity) : capacity_(std::max<std::size_t>(capacity, 2U)) {}
+
+void RollingSpread::add(const Vec3 value) {
+    if(!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z)) {
+        return;
+    }
+    values_.push_back(value);
+    while(values_.size() > capacity_) {
+        values_.pop_front();
+    }
+}
+
+void RollingSpread::clear() {
+    values_.clear();
+}
+
+std::size_t RollingSpread::size() const {
+    return values_.size();
+}
+
+std::optional<Vec3> RollingSpread::standard_deviation() const {
+    if(values_.size() < 2U) {
+        return std::nullopt;
+    }
+    Vec3 mean{};
+    for(const auto& value : values_) {
+        mean.x += value.x;
+        mean.y += value.y;
+        mean.z += value.z;
+    }
+    const float count = static_cast<float>(values_.size());
+    mean = { mean.x / count, mean.y / count, mean.z / count };
+    Vec3 variance{};
+    for(const auto& value : values_) {
+        variance.x += (value.x - mean.x) * (value.x - mean.x);
+        variance.y += (value.y - mean.y) * (value.y - mean.y);
+        variance.z += (value.z - mean.z) * (value.z - mean.z);
+    }
+    return Vec3{ std::sqrt(variance.x / count), std::sqrt(variance.y / count), std::sqrt(variance.z / count) };
+}
+
 HandSignalStabilizer::HandSignalStabilizer(const HandSignalConfig config)
     : config_(config), filter_(config.filter) {
     if(config_.display_hold_ms < 0) {
