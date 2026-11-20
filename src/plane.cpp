@@ -41,7 +41,8 @@ Plane::Plane(const Vec3 origin, const Vec3 u_axis, const Vec3 v_axis, const Vec3
 std::optional<Plane> Plane::from_calibration_points(const Vec3 origin,
                                                     const Vec3 u_reference,
                                                     const Vec3 v_reference,
-                                                    const float minimum_point_distance_mm) {
+                                                    const float minimum_point_distance_mm,
+                                                    const std::optional<Vec3> user_side_hint) {
     const Vec3 raw_u = subtract(u_reference, origin);
     const Vec3 raw_v = subtract(v_reference, origin);
     if(!std::isfinite(minimum_point_distance_mm) || minimum_point_distance_mm <= 0.0F
@@ -65,9 +66,24 @@ std::optional<Plane> Plane::from_calibration_points(const Vec3 origin,
         return std::nullopt;
     }
 
-    const Vec3 toward_camera = scale(origin, -1.0F);
-    if(dot(*normal, toward_camera) < 0.0F) {
-        *normal = scale(*normal, -1.0F);
+    if(user_side_hint.has_value()) {
+        const auto hint = normalized(*user_side_hint);
+        if(!hint.has_value()) {
+            return std::nullopt;
+        }
+        const float cosine = dot(*normal, *hint);
+        if(!std::isfinite(cosine) || std::fabs(cosine) < kMinimumUserSideCosine) {
+            return std::nullopt;
+        }
+        if(cosine < 0.0F) {
+            *normal = scale(*normal, -1.0F);
+        }
+    }
+    else {
+        const Vec3 toward_camera = scale(origin, -1.0F);
+        if(dot(*normal, toward_camera) < 0.0F) {
+            *normal = scale(*normal, -1.0F);
+        }
     }
 
     return Plane(origin, *u_axis, *v_axis, *normal);

@@ -24,6 +24,7 @@ add_library(aerial_touch_core STATIC
     src/calibration_sampler.cpp
     src/camera_projection.cpp
     src/depth_sampler.cpp
+    src/fingertip_extremity.cpp
     src/fingertip_probe.cpp
     src/frame_clock.cpp
     src/input_method.cpp
@@ -126,6 +127,7 @@ if(BUILD_TESTING)
         tests/test_hud_text.cpp
         tests/test_input_method.cpp
         tests/test_interaction_core.cpp
+        tests/test_overhead_mounting.cpp
         tests/test_signal_stability.cpp
         src/utf8_text.cpp
     )

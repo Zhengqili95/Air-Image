@@ -1,4 +1,8 @@
 camera:
+  # 相機擺法。front：相機正對鍵盤面（桌面白紙版），先掃描表面深度再點三點校正。
+  # overhead：顯示器平放、ASKA3D 斜 45° 成出垂直的空中鍵盤，相機在它正上方往下看；用指尖在紙卡上描出平面再點三點，
+  # 法向量朝向手所在的那一側，指尖位置以深度圖修正。
+  mounting: overhead
   depth_work_mode: ""
   depth_precision: 1mm
   preferred_fps: 30
@@ -32,6 +36,26 @@ fingertip:
   # 深度探測點落在「指尖 -> 食指 DIP 關節」連線上的比例;指尖本身位於輪廓邊緣,深度不可靠。
   depth_probe_near_ratio: 0.35
   depth_probe_far_ratio: 0.70
+  # 只用於 overhead：深度與手指探測點相差在此範圍內的像素視為手指，用來找指尖最前端。
+  # 從上方看，手指下方的背景離相機遠很多，所以很容易切開。
+  depth_segment_window_mm: 25.0
+  # 沿手指方向一像素一像素往前看，最前面一段「寬度仍有手指平均寬度這個比例」的位置就是指尖最前端；
+  # 輪廓邊緣零星的雜點寬度只有一兩個像素，會被略過。
+  edge_width_ratio: 0.3
+  # 只用於 overhead：以毫米為單位平滑指尖 3D 位置（One Euro）。用毫米而不是像素，
+  # 離相機近的上排和遠的下排才會得到一樣的平滑程度。抖動仍大就降低 min_cutoff，反應太慢就提高 beta。
+  position_min_cutoff_hz: 1.0
+  position_beta: 0.05
+  # 只用於 overhead：MediaPipe 追丟手（常見於從上方看手背）後，最多再用深度圖跟著手指多久（毫秒）；0 為關閉。
+  depth_coast_ms: 1000
+
+# MediaPipe 手部追蹤的信心門檻（MediaPipe 預設都是 0.5）。從上方看手背時分數偏低，
+# 容易被判定為「手不見了」而追丟；調低 presence／tracking 可以讓已經找到的手不容易掉。
+# 需要重新建置過的 mediapipe_hand_bridge.dll 才會生效；舊版 DLL 會沿用 0.5，HUD 會顯示提醒。
+hand_tracking:
+  min_detection_confidence: 0.5
+  min_presence_confidence: 0.3
+  min_tracking_confidence: 0.3
 
 touch:
   touch_threshold_mm: 10.0

@@ -1,6 +1,9 @@
 #include "aerial_touch/keypad_overlay.hpp"
 #include "aerial_touch/input_method.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace aerial_touch {
 
 KeypadOverlayLayout fixed_keypad_overlay_layout() {
@@ -43,6 +46,23 @@ KeypadKeyVisualState keypad_key_visual_state(const std::string& key,
         return KeypadKeyVisualState::Hover;
     }
     return KeypadKeyVisualState::Idle;
+}
+
+DistanceGaugeScale distance_gauge_scale(const float touch_threshold_mm, const float release_threshold_mm) {
+    const float release = std::max({ release_threshold_mm, touch_threshold_mm, 1.0F });
+    return { 2.0F * release, -release };
+}
+
+int distance_gauge_offset_px(const float distance_mm, const DistanceGaugeScale scale, const int height_px) {
+    if(height_px <= 0) {
+        return 0;
+    }
+    const float span = scale.far_mm - scale.near_mm;
+    if(!std::isfinite(distance_mm) || !std::isfinite(span) || span <= 0.0F) {
+        return height_px;
+    }
+    const float ratio = std::clamp((scale.far_mm - distance_mm) / span, 0.0F, 1.0F);
+    return static_cast<int>(std::lround(ratio * static_cast<float>(height_px)));
 }
 
 std::optional<std::string> currently_pressed_key(const std::optional<std::string>& last_pressed_key,

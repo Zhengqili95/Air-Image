@@ -36,12 +36,24 @@ void clear_error(char* destination, const int capacity) {
     }
 }
 
-}  // namespace
+bool valid_confidence(const float value) {
+    return value > 0.0F && value <= 1.0F;
+}
 
-extern "C" MPHB_API void* mphb_create(const char* model_path, char* error_message, const int error_capacity) {
+void* create_bridge(const char* model_path,
+                    const float min_hand_detection_confidence,
+                    const float min_hand_presence_confidence,
+                    const float min_tracking_confidence,
+                    char* error_message,
+                    const int error_capacity) {
     clear_error(error_message, error_capacity);
     if(model_path == nullptr || model_path[0] == '\0') {
         write_error("模型路徑不可為空", error_message, error_capacity);
+        return nullptr;
+    }
+    if(!valid_confidence(min_hand_detection_confidence) || !valid_confidence(min_hand_presence_confidence)
+       || !valid_confidence(min_tracking_confidence)) {
+        write_error("信心門檻必須介於 0 與 1 之間", error_message, error_capacity);
         return nullptr;
     }
     try {
@@ -49,6 +61,9 @@ extern "C" MPHB_API void* mphb_create(const char* model_path, char* error_messag
         options->base_options.model_asset_path = model_path;
         options->running_mode = mediapipe::tasks::vision::core::RunningMode::VIDEO;
         options->num_hands = 1;
+        options->min_hand_detection_confidence = min_hand_detection_confidence;
+        options->min_hand_presence_confidence = min_hand_presence_confidence;
+        options->min_tracking_confidence = min_tracking_confidence;
 
         auto landmarker = HandLandmarker::Create(std::move(options));
         if(!landmarker.ok()) {
@@ -65,6 +80,22 @@ extern "C" MPHB_API void* mphb_create(const char* model_path, char* error_messag
         write_error("建立手部追蹤器時發生未知例外", error_message, error_capacity);
         return nullptr;
     }
+}
+
+}  // namespace
+
+extern "C" MPHB_API void* mphb_create(const char* model_path, char* error_message, const int error_capacity) {
+    return create_bridge(model_path, 0.5F, 0.5F, 0.5F, error_message, error_capacity);
+}
+
+extern "C" MPHB_API void* mphb_create_with_options(const char* model_path,
+                                                    const float min_hand_detection_confidence,
+                                                    const float min_hand_presence_confidence,
+                                                    const float min_tracking_confidence,
+                                                    char* error_message,
+                                                    const int error_capacity) {
+    return create_bridge(model_path, min_hand_detection_confidence, min_hand_presence_confidence,
+                         min_tracking_confidence, error_message, error_capacity);
 }
 
 extern "C" MPHB_API int mphb_detect_rgb(void* handle,
