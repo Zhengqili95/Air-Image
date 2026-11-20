@@ -11,7 +11,9 @@ if not exist "%APP_DIR%aerial_touch_app.exe" (
     exit /b 1
 )
 cd /d "%APP_DIR%"
-aerial_touch_app.exe
+rem Run it by full path: with NoDefaultCurrentDirectoryInExePath set, cmd does not look in the
+rem current folder, and a bare program name fails with "is not recognized".
+"%APP_DIR%aerial_touch_app.exe"
 echo.
 echo The program has exited. Read any error above, then press any key to close this window.
 pause >nul

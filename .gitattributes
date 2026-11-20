@@ -1,2 +1,4 @@
 # MediaPipe 補丁要套用到 LF 行尾的上游原始碼，checkout 時不可轉成 CRLF。
 *.patch text eol=lf
+# Windows batch files need CRLF line endings on checkout.
+*.cmd text eol=crlf
