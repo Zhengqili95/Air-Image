@@ -119,6 +119,7 @@ git clone --depth 1 --branch v0.10.35 https://github.com/google-ai-edge/mediapip
    - 第一次建置時 Bazel 會下載數 GB 的相依套件，整個過程需要數十分鐘。之後重新建置會沿用快取，快很多。
 5. **PowerShell 擋下腳本**：從網路下載的專案檔案帶有下載標記，執行 `.\scripts\*.ps1` 時會被 `RemoteSigned` 原則擋下。可以先執行 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`，只對目前的視窗有效。
 6. **相機時間戳記**：Windows 沒有註冊 UVC metadata 時，Gemini 2 的硬體時間戳記不會前進。程式會用 `FrameClock` 自動改用主機時間，HUD 會顯示對應的相機警告，不需要額外處理。如果想使用硬體時間戳記，可以用系統管理員權限執行 Orbbec SDK 安裝資料夾裡的 `shared\obsensor_metadata_win10.ps1 -op install_all`。
+7. **PowerShell 更新後連結失敗**：CMake 會記住 vcpkg 複製 DLL 時要用的 `pwsh.exe` 完整路徑。Microsoft Store 版的 PowerShell 每次更新，路徑都會改變，連結後的步驟就會出現 `The system cannot find the path specified`。在 `CMakeUserPresets.json` 的 `cacheVariables` 加上 `"Z_VCPKG_POWERSHELL_PATH": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"`，再重新執行 `cmake --preset local-release` 即可。
 
 ## 執行
 
