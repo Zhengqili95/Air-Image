@@ -91,6 +91,55 @@ void text_line(aerial_touch::Utf8TextCanvas& canvas,
     canvas.draw(text, { 12, 10 + row * 34 }, color);
 }
 
+// Where each frame's time goes, exponentially averaged so the HUD numbers stay readable while still
+// settling within about a second when something changes. Negative means no sample yet.
+struct StageTimings {
+    float capture_ms{ -1.0F };
+    float hand_ms{ -1.0F };
+    float process_ms{ -1.0F };
+    float draw_ms{ -1.0F };
+    float show_ms{ -1.0F };
+    float frame_age_ms{ -1.0F };
+    float dropped_framesets{ -1.0F };
+    // Breakdown of capture_ms.
+    float capture_wait_ms{ -1.0F };
+    float capture_drain_ms{ -1.0F };
+    float capture_filter_ms{ -1.0F };
+    float capture_copy_ms{ -1.0F };
+};
+
+void smooth_into(float& average, const float sample) {
+    constexpr float kWeight = 0.1F;
+    average = average < 0.0F ? sample : average + kWeight * (sample - average);
+}
+
+float elapsed_ms(const std::chrono::steady_clock::time_point from, const std::chrono::steady_clock::time_point to) {
+    return std::chrono::duration<float, std::milli>(to - from).count();
+}
+
+std::string timing_value(const float value, const int precision = 0) {
+    if(value < 0.0F) {
+        return "-";
+    }
+    std::ostringstream text;
+    text << std::fixed << std::setprecision(precision) << value;
+    return text.str();
+}
+
+std::string timing_text(const StageTimings& timings) {
+    return std::string(u8"耗時（ms）：取像 ") + timing_value(timings.capture_ms) + u8"｜手部 "
+           + timing_value(timings.hand_ms) + u8"｜處理 " + timing_value(timings.process_ms) + u8"｜繪製 "
+           + timing_value(timings.draw_ms) + u8"｜顯示 " + timing_value(timings.show_ms) + u8"｜畫面延遲 "
+           + timing_value(timings.frame_age_ms) + u8"｜丟棄舊畫面 " + timing_value(timings.dropped_framesets, 1)
+           + u8" 張";
+}
+
+std::string capture_breakdown_text(const StageTimings& timings) {
+    return std::string(u8"取像細分（ms）：等待新畫面 ") + timing_value(timings.capture_wait_ms, 1) + u8"｜清空佇列 "
+           + timing_value(timings.capture_drain_ms, 1) + u8"｜SDK 濾波 " + timing_value(timings.capture_filter_ms, 1)
+           + u8"｜複製影像 " + timing_value(timings.capture_copy_ms, 1);
+}
+
 // Collect target-surface points around where the operator is pointing.
 //
 // The region has to be a large fraction of the keypad. Sampling a ring a few pixels wide -- which is
@@ -509,9 +558,12 @@ int main(int argc, char** argv) {
 
         cv::namedWindow(kWindowName, cv::WINDOW_NORMAL);
         aerial_touch::set_utf8_window_title(kWindowName, u8"Gemini 2 空中鍵盤");
+        StageTimings timings;
         for(;;) {
             settings_window.process_messages();
+            const auto capture_started = std::chrono::steady_clock::now();
             const auto frame = camera.capture(100);
+            const auto captured = std::chrono::steady_clock::now();
             if(!frame.has_value()) {
                 touch.mark_tracking_lost(last_confirmed_timestamp_ms.value_or(0) + 1);
                 fingertip_stabilizer.reset();
@@ -540,6 +592,7 @@ int main(int argc, char** argv) {
             cv::cvtColor(rgb, display, cv::COLOR_RGB2BGR);
             const auto hand = hand_tracker.detect_rgb(frame->rgb.data(), frame->color_width, frame->color_height,
                                                       frame->color_width * 3, frame->timestamp_ms);
+            const auto hand_tracked = std::chrono::steady_clock::now();
             draw_hand(display, hand);
 
             current_xyz.reset();
@@ -786,7 +839,7 @@ int main(int argc, char** argv) {
                               << vec2_text(event->plane_uv_mm) << u8") 原始距離毫米="
                               << (raw_distance.has_value() ? std::to_string(*raw_distance) : "N/A")
                               << u8" 濾波距離毫米=" << *current_distance << "\n"
-                              << input_status_text(input_method) << "\n";
+                              << input_status_text(input_method) << std::endl;
                 }
                 if(touch.armed()) {
                     active_pressed_key.reset();
@@ -810,6 +863,7 @@ int main(int argc, char** argv) {
                 fps_start = now;
             }
 
+            const auto processed = std::chrono::steady_clock::now();
             active_pressed_key = aerial_touch::currently_pressed_key(
                 active_pressed_key, touch.armed(), current_uv.has_value() && confirmed_tip, calibrating, current_key);
             const std::optional<std::string> pressed_key = active_pressed_key;
@@ -920,12 +974,34 @@ int main(int argc, char** argv) {
                     spread_text << " mm";
                     text_line(canvas, spread_text.str(), 13, { 180, 220, 255 });
                 }
+                // Rows 14 and 15 only fit on frames taller than 480p, where the spare rows run out.
+                if(display.rows >= 10 + 15 * 34) {
+                    text_line(canvas, timing_text(timings), 14, { 160, 255, 160 });
+                }
+                if(display.rows >= 10 + 16 * 34) {
+                    text_line(canvas, capture_breakdown_text(timings), 15, { 160, 255, 160 });
+                }
             }
             settings_window.update_preview({ current_distance, current_uv.has_value() && confirmed_tip,
                                              current_key, touch.armed() });
+            const auto drawn = std::chrono::steady_clock::now();
             cv::imshow(kWindowName, display);
 
             const int key = cv::waitKey(1);
+            const auto shown = std::chrono::steady_clock::now();
+            smooth_into(timings.capture_ms, elapsed_ms(capture_started, captured));
+            smooth_into(timings.hand_ms, elapsed_ms(captured, hand_tracked));
+            smooth_into(timings.process_ms, elapsed_ms(hand_tracked, processed));
+            smooth_into(timings.draw_ms, elapsed_ms(processed, drawn));
+            smooth_into(timings.show_ms, elapsed_ms(drawn, shown));
+            smooth_into(timings.dropped_framesets, static_cast<float>(frame->dropped_framesets));
+            smooth_into(timings.capture_wait_ms, frame->capture_timings.wait_ms);
+            smooth_into(timings.capture_drain_ms, frame->capture_timings.drain_ms);
+            smooth_into(timings.capture_filter_ms, frame->capture_timings.filter_ms);
+            smooth_into(timings.capture_copy_ms, frame->capture_timings.copy_ms);
+            if(frame->host_age_ms >= 0) {
+                smooth_into(timings.frame_age_ms, static_cast<float>(frame->host_age_ms));
+            }
             if(key == 'q' || key == 'Q' || key == 27) {
                 break;
             }

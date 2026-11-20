@@ -516,10 +516,32 @@ std::optional<RgbdFrame> OrbbecCamera::capture(const std::uint32_t timeout_ms) {
         return std::nullopt;
     }
     try {
+        const auto milliseconds_between = [](const std::chrono::steady_clock::time_point from,
+                                             const std::chrono::steady_clock::time_point to) {
+            return std::chrono::duration<float, std::milli>(to - from).count();
+        };
+        const auto wait_started = std::chrono::steady_clock::now();
         auto frameset = impl_->pipeline->waitForFrameset(timeout_ms);
         if(!frameset) {
             return std::nullopt;
         }
+        const auto waited = std::chrono::steady_clock::now();
+        // When processing is slower than the camera (about 16 FPS against 30), framesets queue up
+        // inside the SDK and each one taken is older than the last: the hand on screen ended up
+        // roughly half a second behind the real one. Draining to the newest frameset bounds that lag
+        // to about one frame. The 1 ms timeout, rather than 0, avoids relying on how the SDK treats a
+        // zero wait, and the cap keeps the loop finite whatever the camera does.
+        constexpr int kMaximumDrainedFramesets = 30;
+        std::uint32_t dropped_framesets = 0U;
+        for(int attempt = 0; attempt < kMaximumDrainedFramesets; ++attempt) {
+            auto newer = impl_->pipeline->waitForFrameset(1);
+            if(!newer) {
+                break;
+            }
+            frameset = std::move(newer);
+            ++dropped_framesets;
+        }
+        const auto drained = std::chrono::steady_clock::now();
         if(impl_->software_aligner) {
             const auto aligned = impl_->software_aligner->process(frameset);
             if(!aligned) {
@@ -573,6 +595,7 @@ std::optional<RgbdFrame> OrbbecCamera::capture(const std::uint32_t timeout_ms) {
         if(filtered.frame) {
             depth = filtered.frame->as<ob::DepthFrame>();
         }
+        const auto filtered_at = std::chrono::steady_clock::now();
 
         RgbdFrame frame;
         frame.color_width = static_cast<int>(color->getWidth());
@@ -587,6 +610,19 @@ std::optional<RgbdFrame> OrbbecCamera::capture(const std::uint32_t timeout_ms) {
         if(!was_using_host_clock && impl_->frame_clock.using_host_clock()) {
             add_warning(impl_->runtime_info,
                         u8"相機硬體時間戳記未前進（Windows 尚未註冊 UVC metadata），已改用主機時間");
+        }
+        frame.dropped_framesets = dropped_framesets;
+        const std::uint64_t received_us = color->getSystemTimeStampUs();
+        if(received_us != 0U) {
+            const auto now_us = static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                              std::chrono::system_clock::now().time_since_epoch())
+                                                              .count());
+            const std::int64_t age_ms = (now_us - static_cast<std::int64_t>(received_us)) / 1000;
+            // The SDK stamps host time with the wall clock by default. A negative or huge age means it
+            // was configured otherwise or the clock jumped, so report nothing rather than nonsense.
+            if(age_ms >= 0 && age_ms < 10000) {
+                frame.host_age_ms = age_ms;
+            }
         }
         frame.depth_unit_mm = depth->getValueScale();
 
@@ -633,6 +669,9 @@ std::optional<RgbdFrame> OrbbecCamera::capture(const std::uint32_t timeout_ms) {
                             + std::to_string(frame.depth_height) + u8"；毫米量測與鍵盤投影都會偏移");
         }
 
+        frame.capture_timings = { milliseconds_between(wait_started, waited), milliseconds_between(waited, drained),
+                                  milliseconds_between(drained, filtered_at),
+                                  milliseconds_between(filtered_at, std::chrono::steady_clock::now()) };
         if(!frame.valid()) {
             impl_->error = u8"RGB 與已對齊的深度影像沒有共用有效的像素座標";
             return std::nullopt;
